@@ -325,9 +325,28 @@ async function safeEqual(a, b) {
   return crypto.subtle.timingSafeEqual(ha, hb);
 }
 
+// 簡單的每 IP 速率限制（滑動視窗），避免有人灌爆後端 API 配額或造成 DoS
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 60;
+const rateLimitHits = new Map();
+
+function isRateLimited(request) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const now = Date.now();
+  const hits = (rateLimitHits.get(ip) || []).filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+  hits.push(now);
+  rateLimitHits.set(ip, hits);
+  if (rateLimitHits.size > 10_000) rateLimitHits.clear(); // 避免記憶體無限增長
+  return hits.length > RATE_LIMIT_MAX;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+
+    if (isRateLimited(request)) {
+      return withCors(Response.json({ error: 'Too Many Requests' }, { status: 429 }));
+    }
 
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean);
