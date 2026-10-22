@@ -99,7 +99,13 @@ export class CallRoom {
     const op = url.pathname.slice(1);
     const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
 
-    if (op.startsWith('app/')) this.appSeenAt = Date.now();
+    if (op.startsWith('app/')) {
+      const secret = request.headers.get('X-Relay-Secret') || '';
+      if (!this.env.RELAY_SECRET || !secret || !(await safeEqual(secret, this.env.RELAY_SECRET))) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      this.appSeenAt = Date.now();
+    }
 
     switch (op) {
       case 'app/event': {
@@ -417,6 +423,7 @@ export default {
     if (parts[0] === 'app' && parts[1]) {
       const res = await room(env).fetch(`https://room/app/${parts[1]}${url.search}`, {
         method: request.method,
+        headers: { 'X-Relay-Secret': env.RELAY_SECRET },
         body: request.method === 'POST' ? request.body : undefined,
       });
       if (parts[1] === 'portrait' && res.ok) {
